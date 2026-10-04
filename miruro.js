@@ -1,65 +1,150 @@
-/** Sora Module — Miruro
- * Search / Details / Episodes / Streams
- */
+// ==========================================
+// SORA MODULE — MIRURO DEBUG / PIPE TEST
+// ==========================================
 
 const BASE_URL = "https://www.miruro.to";
-const PIPE_URL = "https://www.miruro.to/api/secure/pipe";
-const MIRURO_PIPE_OBF_KEY = "71951034f8fbcf53d89db52ceb3dc22c";
+const PIPE_URL = `${BASE_URL}/api/secure/pipe`;
 
-// ============================================================
-// GLOBAL
-// ============================================================
+const MIRURO_PIPE_OBF_KEY =
+    "71951034f8fbcf53d89db52ceb3dc22c";
 
-let _global;
-
-try {
-    _global = globalThis;
-} catch (e) {
-    try {
-        _global = window;
-    } catch (e) {
-        try {
-            _global = global;
-        } catch (e) {
-            _global = this;
-        }
-    }
-}
-
-// ============================================================
-// PIPE KEY
-// ============================================================
+// ==========================================
+// HEX KEY
+// ==========================================
 
 const OBF_KEY_BYTES = [];
 
 for (let i = 0; i < MIRURO_PIPE_OBF_KEY.length; i += 2) {
     OBF_KEY_BYTES.push(
-        parseInt(MIRURO_PIPE_OBF_KEY.substr(i, 2), 16)
+        parseInt(MIRURO_PIPE_OBF_KEY.slice(i, i + 2), 16)
     );
 }
 
-// ============================================================
+// ==========================================
+// GLOBAL
+// ==========================================
+
+let GLOBAL;
+
+try {
+    GLOBAL = globalThis;
+} catch (e) {
+    GLOBAL = this;
+}
+
+// ==========================================
+// FETCH COMPATIBILITY
+// ==========================================
+
+async function soraFetch(url, options = {}) {
+    const method = options.method || "GET";
+    const headers = options.headers || {};
+    const body = options.body ?? null;
+
+    console.log(`[HTTP] ${method} ${url}`);
+
+    // Sora
+    if (typeof fetchv2 !== "undefined") {
+        try {
+            const response = await fetchv2(
+                url,
+                headers,
+                method,
+                body
+            );
+
+            if (response) {
+                console.log(
+                    `[HTTP] fetchv2 status: ${response.status ?? "unknown"}`
+                );
+            }
+
+            return response;
+        } catch (e) {
+            console.log(
+                `[HTTP] fetchv2 failed: ${e.message}`
+            );
+        }
+    }
+
+    // Normal fetch fallback
+    if (typeof fetch !== "undefined") {
+        try {
+            const response = await fetch(url, {
+                method,
+                headers,
+                body
+            });
+
+            console.log(
+                `[HTTP] fetch status: ${response.status}`
+            );
+
+            return response;
+        } catch (e) {
+            console.log(
+                `[HTTP] fetch failed: ${e.message}`
+            );
+        }
+    }
+
+    throw new Error("No supported HTTP method available.");
+}
+
+// ==========================================
 // BASE64
-// ============================================================
+// ==========================================
+
+function encodeBase64Url(text) {
+    let binary;
+
+    // UTF-8 → binary
+    if (typeof TextEncoder !== "undefined") {
+        const bytes = new TextEncoder().encode(text);
+
+        binary = "";
+
+        for (const byte of bytes) {
+            binary += String.fromCharCode(byte);
+        }
+    } else {
+        binary = unescape(encodeURIComponent(text));
+    }
+
+    let encoded;
+
+    if (typeof btoa !== "undefined") {
+        encoded = btoa(binary);
+    } else {
+        encoded = pureBtoa(binary);
+    }
+
+    return encoded
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/g, "");
+}
 
 function pureBtoa(input) {
-    let str = String(input);
-    let output = "";
-
     const chars =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
 
+    let output = "";
+
     for (
         let block = 0,
-        charCode,
-        i = 0,
-        map = chars;
-        str.charAt(i | 0) || ((map = "="), i % 1);
+            charCode,
+            i = 0,
+            map = chars;
+
+        input.charAt(i | 0) ||
+        ((map = "="), i % 1);
+
         output += map.charAt(
             63 & (block >> (8 - (i % 1) * 8))
         )
     ) {
-        charCode = str.charCodeAt(i += 3 / 4);
+        charCode = input.charCodeAt(i += 3 / 4);
 
         block =
             (block << 8) |
@@ -69,7 +154,26 @@ function pureBtoa(input) {
     return output;
 }
 
+function decodeBase64Url(input) {
+    let value = String(input)
+        .replace(/-/g, "+")
+        .replace(/_/g, "/");
+
+    while (value.length % 4 !== 0) {
+        value += "=";
+    }
+
+    if (typeof atob !== "undefined") {
+        return atob(value);
+    }
+
+    return pureAtob(value);
+}
+
 function pureAtob(input) {
+    const chars =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+
     let str = String(input).replace(/=+$/, "");
 
     if (str.length % 4 === 1) {
@@ -78,24 +182,25 @@ function pureAtob(input) {
 
     let output = "";
 
-    const chars =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
-
     for (
         let bc = 0,
-        bs = 0,
-        buffer,
-        i = 0;
+            bs = 0,
+            buffer,
+            i = 0;
+
         (buffer = str.charAt(i++));
+
         ~buffer &&
         (
-            bs = bc % 4
-                ? bs * 64 + buffer
-                : buffer,
+            bs =
+                bc % 4
+                    ? bs * 64 + buffer
+                    : buffer,
             bc++ % 4
         )
             ? output += String.fromCharCode(
-                255 & (bs >> (-2 * bc & 6))
+                255 &
+                (bs >> (-2 * bc & 6))
             )
             : 0
     ) {
@@ -105,18 +210,79 @@ function pureAtob(input) {
     return output;
 }
 
-function base64UrlEncode(obj) {
-    const json = JSON.stringify(obj);
-    const utf8 = unescape(encodeURIComponent(json));
-    const b64 = pureBtoa(utf8);
+// ==========================================
+// PAKO
+// ==========================================
 
-    return b64
-        .replace(/\+/g, "-")
-        .replace(/\//g, "_")
-        .replace(/=+$/, "");
+async function ensurePako() {
+    if (GLOBAL.pako) {
+        console.log("[Pako] Already available.");
+        return true;
+    }
+
+    console.log("[Pako] Loading...");
+
+    const response = await soraFetch(
+        "https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js",
+        {
+            method: "GET"
+        }
+    );
+
+    if (!response) {
+        throw new Error("Unable to download pako.");
+    }
+
+    const code =
+        typeof response.text === "function"
+            ? await response.text()
+            : response.data;
+
+    if (!code) {
+        throw new Error("Pako response was empty.");
+    }
+
+    console.log(
+        `[Pako] Downloaded ${code.length} bytes.`
+    );
+
+    const runner =
+        new Function(
+            "window",
+            "global",
+            code
+        );
+
+    runner(GLOBAL, GLOBAL);
+
+    if (!GLOBAL.pako) {
+        throw new Error(
+            "Pako downloaded but did not initialize."
+        );
+    }
+
+    console.log("[Pako] Successfully initialized.");
+
+    return true;
 }
 
-function safeBytesToString(bytes) {
+// ==========================================
+// UTF-8
+// ==========================================
+
+function binaryToUtf8(binary) {
+    const bytes = new Uint8Array(binary.length);
+
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+
+    if (typeof TextDecoder !== "undefined") {
+        try {
+            return new TextDecoder("utf-8").decode(bytes);
+        } catch (e) {}
+    }
+
     let output = "";
 
     for (let i = 0; i < bytes.length; i++) {
@@ -124,70 +290,28 @@ function safeBytesToString(bytes) {
     }
 
     try {
-        return decodeURIComponent(escape(output));
+        return decodeURIComponent(
+            escape(output)
+        );
     } catch (e) {
         return output;
     }
 }
 
-// ============================================================
-// PAKO
-// ============================================================
-
-async function ensurePako() {
-    if (_global.pako) {
-        return true;
-    }
-
-    try {
-        const response = await soraFetch(
-            "https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"
-        );
-
-        if (!response) {
-            console.log("[Miruro] Pako request failed.");
-            return false;
-        }
-
-        const code =
-            typeof response.text === "function"
-                ? await response.text()
-                : response.data;
-
-        if (!code) {
-            console.log("[Miruro] Pako returned no code.");
-            return false;
-        }
-
-        const runner = new Function(
-            "window",
-            "global",
-            code
-        );
-
-        runner(_global, _global);
-
-        return !!_global.pako;
-
-    } catch (error) {
-        console.log(
-            "[Miruro] Pako error:",
-            error.message
-        );
-
-        return false;
-    }
-}
-
-// ============================================================
-// SECURE PIPE
-// ============================================================
+// ==========================================
+// MIRURO PIPE
+// ==========================================
 
 async function makeSecureRequest(
     path,
     query = {},
-    refererUrl = null
+    referer = `${BASE_URL}/`
 ) {
+    console.log("");
+    console.log("==========================================");
+    console.log(`[PIPE] Request: ${path}`);
+    console.log("==========================================");
+
     await ensurePako();
 
     const payload = {
@@ -198,258 +322,300 @@ async function makeSecureRequest(
         version: "0.2.0"
     };
 
-    const encodedPayload =
-        base64UrlEncode(payload);
-
-    const url =
-        `${PIPE_URL}?e=${encodedPayload}`;
+    const jsonPayload =
+        JSON.stringify(payload);
 
     console.log(
-        `[Pipe] Requesting: ${path}`
+        `[PIPE] Payload: ${jsonPayload}`
+    );
+
+    const encoded =
+        encodeBase64Url(jsonPayload);
+
+    const requestUrl =
+        `${PIPE_URL}?e=${encoded}`;
+
+    console.log(
+        `[PIPE] URL: ${requestUrl}`
     );
 
     const headers = {
-        "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/146 Safari/537.36",
-
         "Accept": "*/*",
-
-        "Accept-Language":
-            "en-US,en;q=0.9",
-
+        "Accept-Language": "en-US,en;q=0.9",
         "Origin": BASE_URL,
-
-        "Referer":
-            refererUrl || `${BASE_URL}/`
+        "Referer": referer
     };
 
     let response;
 
     try {
         response = await soraFetch(
-            url,
+            requestUrl,
             {
                 method: "GET",
-                headers: headers
+                headers
             }
         );
-    } catch (error) {
+    } catch (e) {
         console.log(
-            "[Pipe] Network error:",
-            error.message
+            `[PIPE] Network error: ${e.message}`
         );
 
-        return null;
+        throw e;
     }
 
     if (!response) {
-        console.log(
-            "[Pipe] No response."
+        throw new Error(
+            "Miruro returned no response."
         );
-
-        return null;
     }
+
+    const status =
+        response.status ?? "unknown";
+
+    console.log(
+        `[PIPE] HTTP status: ${status}`
+    );
 
     let raw;
 
     try {
-        if (typeof response.text === "function") {
-            raw = await response.text();
-        } else {
-            raw = response.data;
-        }
-    } catch (error) {
-        console.log(
-            "[Pipe] Failed reading response:",
-            error.message
+        raw =
+            typeof response.text === "function"
+                ? await response.text()
+                : response.data;
+    } catch (e) {
+        throw new Error(
+            `Unable to read response: ${e.message}`
         );
-
-        return null;
     }
 
     if (!raw) {
-        console.log(
-            "[Pipe] Empty response."
+        throw new Error(
+            "Miruro response body is empty."
         );
-
-        return null;
     }
 
     console.log(
-        `[Pipe] Raw response size: ${raw.length}`
+        `[PIPE] Response length: ${raw.length}`
     );
 
-    // --------------------------------------------------------
-    // CLOUDFLARE / HTML
-    // --------------------------------------------------------
+    console.log(
+        `[PIPE] Response preview: ${String(raw).slice(0, 200)}`
+    );
 
-    const lowerRaw = String(raw).toLowerCase();
+    // ======================================
+    // DIRECT JSON TEST
+    // ======================================
+
+    try {
+        const direct =
+            JSON.parse(raw);
+
+        console.log(
+            "[PIPE] Response is already JSON."
+        );
+
+        return direct;
+    } catch (e) {
+        // Not JSON — continue decoding.
+    }
+
+    // ======================================
+    // HTML / CLOUDFLARE
+    // ======================================
+
+    const lower =
+        String(raw).toLowerCase();
 
     if (
-        String(raw).trim().startsWith("<") ||
-        lowerRaw.includes("cloudflare") ||
-        lowerRaw.includes("just a moment") ||
-        lowerRaw.includes("upstream unreachable")
+        String(raw).trim().startsWith("<html") ||
+        String(raw).trim().startsWith("<!doctype") ||
+        lower.includes("just a moment") ||
+        lower.includes("cf-chl") ||
+        lower.includes("cloudflare")
     ) {
-        console.log(
-            "[Pipe] Cloudflare / HTML response detected."
+        throw new Error(
+            "Miruro returned an HTML/Cloudflare response."
         );
-
-        return {
-            _blocked_by_cloudflare: true
-        };
     }
 
-    // --------------------------------------------------------
+    // ======================================
     // BASE64
-    // --------------------------------------------------------
+    // ======================================
 
-    let b64 = String(raw)
-        .trim()
-        .replace(/-/g, "+")
-        .replace(/_/g, "/");
+    let binary;
 
-    const padding = b64.length % 4;
-
-    if (padding) {
-        b64 += "=".repeat(4 - padding);
+    try {
+        binary =
+            decodeBase64Url(raw.trim());
+    } catch (e) {
+        throw new Error(
+            `Base64 decoding failed: ${e.message}`
+        );
     }
-
-    const binary = pureAtob(b64);
 
     if (!binary) {
-        console.log(
-            "[Pipe] Base64 decoding failed."
+        throw new Error(
+            "Base64 decoding produced empty data."
         );
-
-        return null;
     }
 
-    const originalBytes = [];
+    console.log(
+        `[PIPE] Base64 decoded: ${binary.length} bytes`
+    );
+
+    // ======================================
+    // CREATE ORIGINAL BYTE ARRAY
+    // ======================================
+
+    const original =
+        new Uint8Array(binary.length);
 
     for (let i = 0; i < binary.length; i++) {
-        originalBytes.push(
-            binary.charCodeAt(i)
-        );
+        original[i] =
+            binary.charCodeAt(i);
     }
 
-    // --------------------------------------------------------
-    // XOR
-    // --------------------------------------------------------
+    // ======================================
+    // ATTEMPT 1 — XOR
+    // ======================================
 
-    const xorBytes = originalBytes.slice();
+    const xorBytes =
+        new Uint8Array(original);
 
-    for (let i = 0; i < xorBytes.length; i++) {
+    for (
+        let i = 0;
+        i < xorBytes.length;
+        i++
+    ) {
         xorBytes[i] ^=
             OBF_KEY_BYTES[
                 i % OBF_KEY_BYTES.length
             ];
     }
 
-    let jsonString = null;
-
-    // --------------------------------------------------------
-    // TRY XOR + GZIP
-    // --------------------------------------------------------
-
-    if (_global.pako) {
-        try {
-            jsonString =
-                _global.pako.ungzip(
-                    xorBytes,
-                    { to: "string" }
-                );
-        } catch (e) {
-            try {
-                jsonString =
-                    _global.pako.inflate(
-                        xorBytes,
-                        { to: "string" }
-                    );
-            } catch (e2) {
-                // Continue.
-            }
-        }
-    }
-
-    // --------------------------------------------------------
-    // TRY WITHOUT XOR
-    // --------------------------------------------------------
-
-    if (!jsonString && _global.pako) {
-        try {
-            jsonString =
-                _global.pako.ungzip(
-                    originalBytes,
-                    { to: "string" }
-                );
-        } catch (e) {
-            try {
-                jsonString =
-                    _global.pako.inflate(
-                        originalBytes,
-                        { to: "string" }
-                    );
-            } catch (e2) {
-                // Continue.
-            }
-        }
-    }
-
-    // --------------------------------------------------------
-    // RAW FALLBACK
-    // --------------------------------------------------------
-
-    if (!jsonString) {
-        jsonString =
-            safeBytesToString(originalBytes);
-    }
-
-    if (!jsonString) {
-        console.log(
-            "[Pipe] Empty decoded string."
-        );
-
-        return null;
-    }
-
-    // --------------------------------------------------------
-    // JSON
-    // --------------------------------------------------------
+    console.log(
+        "[PIPE] Trying XOR + gzip..."
+    );
 
     try {
-        const parsed =
-            JSON.parse(String(jsonString));
+        const result =
+            GLOBAL.pako.ungzip(
+                xorBytes,
+                { to: "string" }
+            );
 
         console.log(
-            `[Pipe] ${path} JSON parsed successfully.`
+            "[PIPE] XOR + gzip succeeded."
         );
 
-        return parsed;
-
-    } catch (error) {
+        return JSON.parse(result);
+    } catch (e) {
         console.log(
-            "[Pipe] JSON parse failed:",
-            error.message
+            `[PIPE] XOR + gzip failed: ${e.message}`
         );
+    }
+
+    // ======================================
+    // ATTEMPT 2 — XOR + DEFLATE
+    // ======================================
+
+    try {
+        const result =
+            GLOBAL.pako.inflate(
+                xorBytes,
+                { to: "string" }
+            );
 
         console.log(
-            "[Pipe] Decoded preview:",
-            String(jsonString).substring(0, 300)
+            "[PIPE] XOR + deflate succeeded."
         );
 
-        return null;
+        return JSON.parse(result);
+    } catch (e) {
+        console.log(
+            `[PIPE] XOR + deflate failed: ${e.message}`
+        );
+    }
+
+    // ======================================
+    // ATTEMPT 3 — RAW GZIP
+    // ======================================
+
+    console.log(
+        "[PIPE] Trying raw gzip..."
+    );
+
+    try {
+        const result =
+            GLOBAL.pako.ungzip(
+                original,
+                { to: "string" }
+            );
+
+        console.log(
+            "[PIPE] Raw gzip succeeded."
+        );
+
+        return JSON.parse(result);
+    } catch (e) {
+        console.log(
+            `[PIPE] Raw gzip failed: ${e.message}`
+        );
+    }
+
+    // ======================================
+    // ATTEMPT 4 — RAW DEFLATE
+    // ======================================
+
+    try {
+        const result =
+            GLOBAL.pako.inflate(
+                original,
+                { to: "string" }
+            );
+
+        console.log(
+            "[PIPE] Raw deflate succeeded."
+        );
+
+        return JSON.parse(result);
+    } catch (e) {
+        console.log(
+            `[PIPE] Raw deflate failed: ${e.message}`
+        );
+    }
+
+    // ======================================
+    // FINAL TEXT ATTEMPT
+    // ======================================
+
+    const text =
+        binaryToUtf8(binary);
+
+    console.log(
+        `[PIPE] Final text preview: ${text.slice(0, 500)}`
+    );
+
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        throw new Error(
+            "Miruro response could not be decoded as JSON."
+        );
     }
 }
 
-// ============================================================
+// ==========================================
 // SEARCH
-// ============================================================
+// ==========================================
 
 async function searchResults(keyword) {
-    console.log(
-        `[Search] Searching for: ${keyword}`
-    );
+    console.log("");
+    console.log("==========================================");
+    console.log(`[SEARCH] ${keyword}`);
+    console.log("==========================================");
 
     try {
         const data =
@@ -457,7 +623,7 @@ async function searchResults(keyword) {
                 "search",
                 {
                     q: keyword,
-                    limit: 30,
+                    limit: 5,
                     offset: 0,
                     sort: "POPULARITY_DESC",
                     type: "ANIME",
@@ -466,54 +632,28 @@ async function searchResults(keyword) {
             );
 
         console.log(
-            "[Search] Response:",
-            data
+            "[SEARCH] Successful response:"
         );
 
-        if (
-            !data ||
-            data._blocked_by_cloudflare
-        ) {
-            console.log(
-                "[Search] No usable response."
-            );
+        console.log(data);
 
-            return JSON.stringify([]);
-        }
-
-        // Support several possible response structures.
         let items = [];
 
-        if (Array.isArray(data)) {
-            items = data;
-        } else if (
+        if (
+            data &&
             Array.isArray(data.results)
         ) {
             items = data.results;
         } else if (
-            Array.isArray(data.data?.results)
+            Array.isArray(data)
         ) {
-            items = data.data.results;
-        } else if (
-            Array.isArray(data.data?.animes)
-        ) {
-            items = data.data.animes;
-        } else if (
-            Array.isArray(data.data)
-        ) {
-            items = data.data;
+            items = data;
         }
-
-        console.log(
-            `[Search] Items found: ${items.length}`
-        );
 
         const results = [];
 
         for (const item of items) {
-            if (!item) {
-                continue;
-            }
+            if (!item) continue;
 
             if (item.isAdult === true) {
                 continue;
@@ -521,617 +661,79 @@ async function searchResults(keyword) {
 
             if (
                 Array.isArray(item.genres) &&
-                item.genres.some(
-                    genre =>
-                        String(genre).toLowerCase() ===
-                        "hentai"
-                )
+                item.genres.includes("Hentai")
             ) {
                 continue;
             }
 
-            const id =
-                item.id ??
-                item.anilistId ??
-                item.anilist_id;
+            const id = item.id;
 
-            if (id === undefined || id === null) {
+            if (id == null) {
                 continue;
             }
 
-            let title = "Unknown Title";
-
-            if (typeof item.title === "string") {
-                title = item.title;
-            } else if (item.title) {
-                title =
-                    item.title.romaji ||
-                    item.title.english ||
-                    item.title.native ||
-                    "Unknown Title";
-            }
+            const title =
+                item.title?.romaji ||
+                item.title?.english ||
+                item.title?.native ||
+                "Unknown";
 
             const image =
                 item.coverImage?.large ||
                 item.coverImage?.medium ||
-                item.poster ||
-                item.image ||
                 "";
 
             results.push({
-                title: title,
-                image: image,
+                title,
+                image,
                 href: `miruro://${id}`
             });
         }
 
         console.log(
-            `[Search] Returning ${results.length} results.`
+            `[SEARCH] Results: ${results.length}`
         );
 
         return JSON.stringify(results);
 
-    } catch (error) {
+    } catch (e) {
         console.log(
-            "[Search] Error:",
-            error.message
+            `[SEARCH] FAILED: ${e.message}`
         );
+
+        console.log(e.stack || "");
 
         return JSON.stringify([]);
     }
 }
 
-// ============================================================
-// DETAILS
-// ============================================================
+// ==========================================
+// TEMPORARY TEST
+// ==========================================
 
-async function extractDetails(url) {
-    console.log(
-        `[Details] Loading: ${url}`
-    );
-
-    try {
-        const id =
-            String(url)
-                .replace("miruro://", "")
-                .trim();
-
-        if (!id) {
-            throw new Error(
-                "Missing AniList ID"
-            );
-        }
-
-        const data =
-            await makeSecureRequest(
-                `info/anilist/${id}`
-            );
-
-        if (
-            !data ||
-            data._blocked_by_cloudflare
-        ) {
-            return JSON.stringify([
-                {
-                    description:
-                        "Network error.",
-                    aliases: "",
-                    airdate: ""
-                }
-            ]);
-        }
-
-        let description =
-            "No description available.";
-
-        let year = "Unknown";
-        let rating = "N/A";
-
-        if (data.description) {
-            description =
-                String(data.description)
-                    .replace(/<[^>]*>/g, "")
-                    .trim();
-        }
-
-        if (data.seasonYear) {
-            year = data.seasonYear;
-        }
-
-        if (data.averageScore) {
-            rating =
-                `${data.averageScore}/100`;
-        }
-
-        return JSON.stringify([
-            {
-                description: description,
-                aliases: `Score: ${rating}`,
-                airdate: `Year: ${year}`
-            }
-        ]);
-
-    } catch (error) {
-        console.log(
-            "[Details] Error:",
-            error.message
-        );
-
-        return JSON.stringify([
-            {
-                description:
-                    "Loading error.",
-                aliases: "",
-                airdate: ""
-            }
-        ]);
-    }
-}
-
-// ============================================================
-// EPISODES
-// ============================================================
-
-async function extractEpisodes(url) {
-    console.log(
-        `[Episodes] Loading: ${url}`
-    );
+async function testMiruro() {
+    console.log("");
+    console.log("##########################################");
+    console.log("# MIRURO PIPE TEST");
+    console.log("##########################################");
 
     try {
-        const anilistId =
-            String(url)
-                .replace("miruro://", "")
-                .trim();
+        const result =
+            await searchResults("Naruto");
 
-        if (!anilistId) {
-            return JSON.stringify([]);
-        }
+        console.log("");
+        console.log("========== FINAL RESULT ==========");
+        console.log(result);
 
-        const data =
-            await makeSecureRequest(
-                "episodes",
-                {
-                    anilistId: anilistId
-                }
-            );
+        return result;
 
-        if (
-            !data ||
-            data._blocked_by_cloudflare
-        ) {
-            return JSON.stringify([]);
-        }
-
-        const allEpisodes = [];
-
-        function collectEpisodes(obj) {
-            if (Array.isArray(obj)) {
-                for (const item of obj) {
-                    if (
-                        item &&
-                        item.id !== undefined &&
-                        item.number !== undefined
-                    ) {
-                        allEpisodes.push(item);
-                    } else {
-                        collectEpisodes(item);
-                    }
-                }
-
-                return;
-            }
-
-            if (
-                obj &&
-                typeof obj === "object"
-            ) {
-                for (const value of Object.values(obj)) {
-                    collectEpisodes(value);
-                }
-            }
-        }
-
-        collectEpisodes(data);
-
-        const seen = new Set();
-        const episodes = [];
-
-        for (const ep of allEpisodes) {
-            const number =
-                Number(ep.number);
-
-            if (
-                !Number.isFinite(number) ||
-                seen.has(number)
-            ) {
-                continue;
-            }
-
-            seen.add(number);
-
-            episodes.push({
-                href:
-                    `miruro-play://${anilistId}/${number}`,
-                number: number,
-                season: 1,
-                title:
-                    ep.title ||
-                    `Episode ${number}`
-            });
-        }
-
-        episodes.sort(
-            (a, b) =>
-                a.number - b.number
-        );
-
+    } catch (e) {
         console.log(
-            `[Episodes] Found ${episodes.length} episodes.`
+            `[TEST] FAILED: ${e.message}`
         );
 
-        return JSON.stringify(episodes);
-
-    } catch (error) {
-        console.log(
-            "[Episodes] Error:",
-            error.message
-        );
-
-        return JSON.stringify([]);
-    }
-}
-
-// ============================================================
-// STREAM
-// ============================================================
-
-async function extractStreamUrl(url) {
-    console.log(
-        `[Player] Loading: ${url}`
-    );
-
-    try {
-        const clean =
-            String(url)
-                .replace("miruro-play://", "");
-
-        const parts =
-            clean.split("/");
-
-        const anilistId = parts[0];
-        const epNumber = parts[1];
-
-        if (!anilistId || !epNumber) {
-            return null;
-        }
-
-        const watchReferer =
-            `${BASE_URL}/watch/${anilistId}/${epNumber}?ep=${epNumber}`;
-
-        const episodesData =
-            await makeSecureRequest(
-                "episodes",
-                {
-                    anilistId: anilistId
-                }
-            );
-
-        if (
-            !episodesData ||
-            episodesData._blocked_by_cloudflare
-        ) {
-            return null;
-        }
-
-        const configs = [];
-
-        function scanProviders(obj) {
-            if (
-                !obj ||
-                typeof obj !== "object"
-            ) {
-                return;
-            }
-
-            if (
-                obj.providers &&
-                typeof obj.providers === "object"
-            ) {
-                for (
-                    const [providerName, provider]
-                    of Object.entries(obj.providers)
-                ) {
-                    if (
-                        !provider ||
-                        !provider.episodes
-                    ) {
-                        continue;
-                    }
-
-                    for (
-                        const [category, list]
-                        of Object.entries(
-                            provider.episodes
-                        )
-                    ) {
-                        if (!Array.isArray(list)) {
-                            continue;
-                        }
-
-                        const episode =
-                            list.find(
-                                ep =>
-                                    Number(ep.number) ===
-                                    Number(epNumber)
-                            );
-
-                        if (
-                            episode &&
-                            episode.id
-                        ) {
-                            configs.push({
-                                provider:
-                                    String(providerName)
-                                        .toLowerCase(),
-
-                                category:
-                                    String(category)
-                                        .toLowerCase(),
-
-                                episodeId:
-                                    episode.id
-                            });
-                        }
-                    }
-                }
-            }
-
-            for (const value of Object.values(obj)) {
-                if (
-                    value &&
-                    typeof value === "object"
-                ) {
-                    scanProviders(value);
-                }
-            }
-        }
-
-        scanProviders(episodesData);
-
-        console.log(
-            `[Player] Providers found: ${configs.length}`
-        );
-
-        const providersRequiringAniListId = [
-            "dune",
-            "zoro",
-            "arc",
-            "kiwi",
-            "telli",
-            "bee",
-            "bun",
-            "nun",
-            "ally",
-            "hop"
-        ];
-
-        for (const config of configs) {
-            try {
-                const query = {
-                    episodeId:
-                        config.episodeId,
-
-                    provider:
-                        config.provider,
-
-                    category:
-                        config.category,
-
-                    ttl: 86400
-                };
-
-                if (
-                    providersRequiringAniListId
-                        .includes(config.provider)
-                ) {
-                    query.anilistId =
-                        Number(anilistId);
-                }
-
-                const response =
-                    await makeSecureRequest(
-                        "sources",
-                        query,
-                        watchReferer
-                    );
-
-                if (
-                    !response ||
-                    response._blocked_by_cloudflare
-                ) {
-                    continue;
-                }
-
-                let sources =
-                    response.sources ||
-                    response.streams ||
-                    [];
-
-                if (
-                    !Array.isArray(sources) ||
-                    sources.length === 0
-                ) {
-                    const keys = [
-                        config.category,
-                        "sub",
-                        "ssub",
-                        "dub",
-                        "hdub",
-                        "hsub"
-                    ];
-
-                    for (const key of keys) {
-                        const value =
-                            response[key];
-
-                        if (!value) {
-                            continue;
-                        }
-
-                        if (
-                            Array.isArray(
-                                value.sources
-                            )
-                        ) {
-                            sources =
-                                value.sources;
-                            break;
-                        }
-
-                        if (
-                            Array.isArray(
-                                value.streams
-                            )
-                        ) {
-                            sources =
-                                value.streams;
-                            break;
-                        }
-                    }
-                }
-
-                if (
-                    !Array.isArray(sources)
-                ) {
-                    continue;
-                }
-
-                for (const source of sources) {
-                    if (!source?.url) {
-                        continue;
-                    }
-
-                    const lower =
-                        String(source.url)
-                            .toLowerCase();
-
-                    const isHLS =
-                        lower.includes(".m3u8") ||
-                        source.type === "hls";
-
-                    if (!isHLS) {
-                        continue;
-                    }
-
-                    let streamUrl =
-                        source.url;
-
-                    // Preserve your original Miruro
-                    // compatibility replacement.
-                    if (
-                        streamUrl.includes(
-                            "uwu.m3u8"
-                        )
-                    ) {
-                        streamUrl =
-                            streamUrl
-                                .replace(
-                                    "/stream/",
-                                    "/hls/"
-                                )
-                                .replace(
-                                    "uwu.m3u8",
-                                    "owo.m3u8"
-                                );
-                    }
-
-                    console.log(
-                        "[Player] HLS found:",
-                        streamUrl
-                    );
-
-                    return JSON.stringify({
-                        type: "hls",
-                        url: streamUrl,
-                        headers: {
-                            Referer:
-                                source.referer ||
-                                `${BASE_URL}/`
-                        }
-                    });
-                }
-
-            } catch (error) {
-                console.log(
-                    `[Player] ${config.provider} error:`,
-                    error.message
-                );
-            }
-        }
-
-        console.log(
-            "[Player] No playable HLS stream found."
-        );
-
-        return null;
-
-    } catch (error) {
-        console.log(
-            "[Player] Error:",
-            error.message
-        );
-
-        return null;
-    }
-}
-
-// ============================================================
-// SORA FETCH
-// ============================================================
-
-async function soraFetch(
-    url,
-    options = {
-        headers: {},
-        method: "GET",
-        body: null
-    }
-) {
-    try {
-        if (
-            typeof fetchv2 !== "undefined"
-        ) {
-            return await fetchv2(
-                url,
-                options.headers ?? {},
-                options.method ?? "GET",
-                options.body ?? null
-            );
-        }
-
-        return await fetch(
-            url,
-            options
-        );
-
-    } catch (error) {
-        console.log(
-            "[soraFetch] Primary fetch failed:",
-            error.message
-        );
-
-        try {
-            return await fetch(
-                url,
-                options
-            );
-        } catch (fallbackError) {
-            console.log(
-                "[soraFetch] Fallback failed:",
-                fallbackError.message
-            );
-
-            return null;
-        }
+        return JSON.stringify({
+            error: String(e)
+        });
     }
 }
